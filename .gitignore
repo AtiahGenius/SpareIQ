@@ -1,0 +1,22 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+npm-debug.log*
+
+# Future tooling (if a build step / package manager is introduced)
+node_modules/
+dist/
+build/
+.env
+.env.local
+
+# Archive/export artifacts
+*.zip
