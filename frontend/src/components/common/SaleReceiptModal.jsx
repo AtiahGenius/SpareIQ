@@ -77,7 +77,13 @@ export const SaleReceiptModal = ({ sale, onClose }) => {
           <div className="paper-jag" />
 
           <div style={{ textAlign: 'center', marginTop: '14px' }}>
-            <button className="btn btn-sm" onClick={() => window.print()}>🖨 Print Receipt</button>
+            <button className="btn btn-sm" onClick={() => {
+              if (window.electronAPI && window.electronAPI.printReceipt) {
+                window.electronAPI.printReceipt();
+              } else {
+                window.print();
+              }
+            }}>🖨 Print Receipt</button>
           </div>
         </div>
       </div>
