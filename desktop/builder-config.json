@@ -1,0 +1,27 @@
+{
+  "appId": "com.resolvex.spareiq",
+  "productName": "SpareIQ",
+  "directories": {
+    "output": "../dist-desktop",
+    "buildResources": "build"
+  },
+  "files": [
+    "**/*",
+    "../frontend/dist/**/*"
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "SpareIQ"
+  }
+}

@@ -5,7 +5,9 @@
   "scripts": {
     "dev:frontend": "npm run dev --prefix frontend",
     "dev:server": "npm run dev --prefix server",
+    "dev:desktop": "npm run dev --prefix desktop",
     "build:frontend": "npm run build --prefix frontend",
+    "build:desktop": "npm run build:win --prefix desktop",
     "start:server": "npm start --prefix server"
   }
 }
