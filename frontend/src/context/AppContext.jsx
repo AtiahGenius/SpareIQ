@@ -2,6 +2,8 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 
 const AppContext = createContext();
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api/v1';
+
 const SUPPLIERS = [
   { name: "FU WAN Motor Parts", phone: "+233 24 411 2290", address: "Abossey Okai, Accra" },
   { name: "Silver Star Cycle Traders", phone: "+233 20 552 8813", address: "Suame Magazine, Kumasi" },
@@ -45,6 +47,7 @@ const INITIAL_EMPLOYEES = [
 export const AppProvider = ({ children }) => {
   const [theme, setThemeState] = useState('light');
   const [currentUser, setCurrentUser] = useState(null);
+  const [authToken, setAuthToken] = useState(localStorage.getItem('spareiq_token') || null);
   const [activeView, setActiveView] = useState('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
@@ -83,9 +86,45 @@ export const AppProvider = ({ children }) => {
   const [sessionCountdown, setSessionCountdown] = useState(SESSION_TIMEOUT_SECONDS);
   const inactivityTimerRef = useRef(null);
 
-  // Initialize seed data
+  // Helper: Money Formatter
+  const money = (amount) => {
+    const num = parseFloat(amount) || 0;
+    return `GHS ${num.toFixed(2)}`;
+  };
+
+  // Helper: Toast Notifications
+  const showToast = (message, type = 'info') => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 4000);
+  };
+
+  const toast = (message, type = 'info') => showToast(message, type);
+
+  // Helper: Audit Logger
+  const logAudit = (action, detail) => {
+    if (!currentUser) return;
+    const entry = {
+      id: 'AUD-' + Date.now(),
+      timestamp: new Date().toISOString(),
+      user: `${currentUser.name} (${currentUser.id})`,
+      action,
+      detail
+    };
+    setAuditLog(prev => [entry, ...prev]);
+  };
+
+  // Theme Toggler
+  const setTheme = (newTheme) => {
+    setThemeState(newTheme);
+    document.documentElement.setAttribute('data-theme', newTheme);
+  };
+
+  // Initialize seed data & server sync
   useEffect(() => {
-    // Inventory
+    // Inventory Local Fallback Seed
     const inv = INVENTORY_SEED.map(i => ({
       ...i,
       ...(EXTRA_SEED[i.code] || { sellingPrice: i.cost * 1.4, stock: 20, minStock: 10, category: "General", barcode: "" }),
@@ -95,516 +134,562 @@ export const AppProvider = ({ children }) => {
     }));
     setInventory(inv);
 
-    // Suppliers meta
     const supMap = {};
     SUPPLIERS.forEach(s => { supMap[s.name] = { phone: s.phone, address: s.address }; });
     setSuppliersMeta(supMap);
 
-    // Sample Receipts
-    const sampleReceipts = [
-      { supplier: "FU WAN Motor Parts", daysAgo: 2, items: [["Brake Rod GN", 6, 18.5], ["Spark Plug A7TC", 20, 6]], invoiceNo: "INV-5619", tax: 0, discount: 10 },
-      { supplier: "Silver Star Cycle Traders", daysAgo: 6, items: [["Battery 12V 7Ah", 4, 145], ["Handle Grip Set", 8, 14]], invoiceNo: "SS-2214", tax: 0, discount: 0 },
-      { supplier: "TVS Parts Ghana Ltd", daysAgo: 11, items: [["Chain & Sprocket Kit 428", 3, 210], ["Engine Oil 4T 1L", 12, 32]], invoiceNo: "TVS-9012", tax: 5, discount: 0 },
-      { supplier: "Honda Genuine Spares", daysAgo: 18, items: [["Front Brake Pad", 10, 28], ["CDI Unit Universal", 5, 38]], invoiceNo: "HGS-4471", tax: 0, discount: 15 },
-      { supplier: "FU WAN Motor Parts", daysAgo: 24, items: [["Tyre 90/90-18", 6, 165], ["Clutch Cable", 10, 22]], invoiceNo: "INV-5588", tax: 0, discount: 0 },
-      { supplier: "Wan Li Import & Export", daysAgo: 33, items: [["Spark Plug A7TC", 50, 6], ["Brake Rod GN", 12, 18.5]], invoiceNo: "WL-77031", tax: 0, discount: 20 },
-      { supplier: "Silver Star Cycle Traders", daysAgo: 40, items: [["Battery 12V 7Ah", 6, 145], ["Engine Oil 4T 1L", 20, 32]], invoiceNo: "SS-2190", tax: 0, discount: 0 },
-      { supplier: "TVS Parts Ghana Ltd", daysAgo: 52, items: [["Chain & Sprocket Kit 428", 4, 210], ["Front Brake Pad", 6, 28]], invoiceNo: "TVS-8890", tax: 0, discount: 0 },
-      { supplier: "FU WAN Motor Parts", daysAgo: 61, items: [["Handle Grip Set", 15, 14], ["CDI Unit Universal", 8, 38]], invoiceNo: "INV-5501", tax: 0, discount: 0 },
-      { supplier: "Honda Genuine Spares", daysAgo: 70, items: [["Tyre 90/90-18", 4, 165], ["Clutch Cable", 6, 22]], invoiceNo: "HGS-4390", tax: 0, discount: 0 },
-      { supplier: "Wan Li Import & Export", daysAgo: 80, items: [["Brake Rod GN", 30, 17.5], ["Spark Plug A7TC", 100, 5.5]], invoiceNo: "WL-76890", tax: 0, discount: 40 },
-      { supplier: "Silver Star Cycle Traders", daysAgo: 95, items: [["Battery 12V 7Ah", 3, 150]], invoiceNo: "SS-2050", tax: 0, discount: 0 },
-    ];
-
-    let rSeq = 1;
-    const rList = sampleReceipts.map(r => {
-      const date = new Date(Date.now() - r.daysAgo * 86400000);
-      const items = r.items.map(([name, qty, price]) => {
-        const itemMatch = inv.find(i => i.name === name);
-        return { code: itemMatch ? itemMatch.code : "—", name, qty, unitPrice: price, total: +(qty * price).toFixed(2) };
+    // Initial check for logged in user token
+    if (authToken) {
+      fetch(`${API_BASE_URL}/auth/me`, {
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      })
+      .then(res => res.ok ? res.json() : Promise.reject())
+      .then(data => {
+        if (data.user) {
+          setCurrentUser(data.user);
+          refreshBackendData(authToken);
+        }
+      })
+      .catch(() => {
+        localStorage.removeItem('spareiq_token');
+        setAuthToken(null);
       });
-      const subtotal = items.reduce((s, i) => s + i.total, 0);
-      const grand = +(subtotal - r.discount + r.tax).toFixed(2);
-      const rec = {
-        id: rSeq,
-        receiptNo: "R-" + String(rSeq).padStart(5, "0"),
-        invoiceNo: r.invoiceNo,
-        supplier: r.supplier,
-        date: date.toISOString().slice(0, 10),
-        time: "10:3" + (rSeq % 9) + " AM",
-        currency: "GHS",
-        items, subtotal, discount: r.discount, tax: r.tax, grandTotal: grand,
-        notes: "", imageDataUrl: null, status: "verified"
-      };
-      rSeq++;
-      return rec;
-    });
-    setReceipts(rList);
-    setReceiptSeq(rSeq);
-
-    // Initial stock log
-    const sLog = inv.map(i => ({
-      code: i.code, name: i.name, type: "Opening Stock", change: i.stock,
-      date: new Date(Date.now() - 150 * 86400000).toISOString().slice(0, 10), user: "System"
-    }));
-    setStockLog(sLog);
-
-    // Historical sales
-    const sampleSales = [
-      { daysAgo: 1, emp: "EMP0002", items: [["SPK-A7TC", 2], ["OIL-4T-1L", 1]] },
-      { daysAgo: 1, emp: "EMP0002", items: [["BRK-PAD-FRT", 1]] },
-      { daysAgo: 2, emp: "EMP0003", items: [["HDL-GRIP-STD", 1], ["CLU-CBL-STD", 1]] },
-      { daysAgo: 3, emp: "EMP0002", items: [["TYR-90-90-18", 1]] },
-      { daysAgo: 4, emp: "EMP0002", items: [["CDI-UNIV", 1], ["SPK-A7TC", 4]] },
-      { daysAgo: 5, emp: "EMP0003", items: [["BAT-12V-7AH", 1]] },
-      { daysAgo: 6, emp: "EMP0002", items: [["0514000HS01L-01-001", 2]] },
-      { daysAgo: 8, emp: "EMP0002", items: [["OIL-4T-1L", 3], ["SPK-A7TC", 6]] },
-    ];
-    let sSeq = 1;
-    const saleList = sampleSales.map(s => {
-      const emp = INITIAL_EMPLOYEES.find(e => e.id === s.emp);
-      const items = s.items.map(([code, qty]) => {
-        const itemInv = inv.find(i => i.code === code);
-        return {
-          code, name: itemInv.name, qty, sellingPrice: itemInv.sellingPrice,
-          costPrice: itemInv.cost, total: +(qty * itemInv.sellingPrice).toFixed(2),
-          profit: +(qty * (itemInv.sellingPrice - itemInv.cost)).toFixed(2)
-        };
-      });
-      const total = items.reduce((a, b) => a + b.total, 0);
-      const date = new Date(Date.now() - s.daysAgo * 86400000);
-      const obj = {
-        id: sSeq,
-        txnId: "TXN-" + String(sSeq).padStart(5, "0"),
-        receiptNo: "S-" + String(sSeq).padStart(5, "0"),
-        date: date.toISOString().slice(0, 10),
-        time: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        empId: emp.id, empName: emp.name, items, subtotal: total, discount: 0, tax: 0,
-        grandTotal: total, amountPaid: total, balance: 0, paymentMethod: "Cash"
-      };
-      sSeq++;
-      return obj;
-    });
-    setSales(saleList);
-    setSaleSeq(sSeq);
-
-    setAuditLog([{ time: new Date().toISOString(), user: "System", action: "Application initialized", detail: "Demo data seeded" }]);
+    }
   }, []);
 
-  // Theme effect
-  useEffect(() => {
-    document.body.setAttribute('data-theme', theme);
-  }, [theme]);
+  // Fetch all backend data from Node/Express API
+  const refreshBackendData = async (token = authToken) => {
+    if (!token) return;
+    const headers = { 'Authorization': `Bearer ${token}` };
 
-  // Session activity timer
+    try {
+      // Inventory
+      const invRes = await fetch(`${API_BASE_URL}/inventory`, { headers });
+      if (invRes.ok) {
+        const invData = await invRes.json();
+        if (Array.isArray(invData) && invData.length > 0) setInventory(invData);
+      }
+
+      // Receipts
+      const recRes = await fetch(`${API_BASE_URL}/receipts`, { headers });
+      if (recRes.ok) {
+        const recData = await recRes.json();
+        if (Array.isArray(recData)) setReceipts(recData);
+      }
+
+      // Sales
+      const salesRes = await fetch(`${API_BASE_URL}/sales`, { headers });
+      if (salesRes.ok) {
+        const salesData = await salesRes.json();
+        if (Array.isArray(salesData)) setSales(salesData);
+      }
+
+      // Employees
+      const empRes = await fetch(`${API_BASE_URL}/employees`, { headers });
+      if (empRes.ok) {
+        const empData = await empRes.json();
+        if (Array.isArray(empData) && empData.length > 0) setEmployees(empData);
+      }
+
+      // Shop Profile
+      const shopRes = await fetch(`${API_BASE_URL}/settings/shop-profile`, { headers });
+      if (shopRes.ok) {
+        const shopData = await shopRes.json();
+        if (shopData && shopData.name) setShopProfile(shopData);
+      }
+    } catch (err) {
+      console.warn('Backend server offline or unreachable. Running in local state mode.');
+    }
+  };
+
+  // Inactivity timer logic
+  const resetInactivityTimer = () => {
+    setSessionCountdown(SESSION_TIMEOUT_SECONDS);
+  };
+
   useEffect(() => {
     if (!currentUser) return;
 
-    let countdown = SESSION_TIMEOUT_SECONDS;
-    setSessionCountdown(countdown);
+    const handleUserActivity = () => resetInactivityTimer();
+    window.addEventListener('mousemove', handleUserActivity);
+    window.addEventListener('keydown', handleUserActivity);
+    window.addEventListener('click', handleUserActivity);
 
-    const interval = setInterval(() => {
-      countdown--;
-      setSessionCountdown(countdown);
-      if (countdown <= 0) {
-        logout(true);
-      }
+    inactivityTimerRef.current = setInterval(() => {
+      setSessionCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(inactivityTimerRef.current);
+          logout(true); // Auto logout on timeout
+          return 0;
+        }
+        return prev - 1;
+      });
     }, 1000);
 
-    const resetTimer = () => {
-      countdown = SESSION_TIMEOUT_SECONDS;
-      setSessionCountdown(countdown);
-    };
-
-    const events = ["click", "keydown", "mousemove", "touchstart"];
-    events.forEach(ev => window.addEventListener(ev, resetTimer, { passive: true }));
-
     return () => {
-      clearInterval(interval);
-      events.forEach(ev => window.removeEventListener(ev, resetTimer));
+      window.removeEventListener('mousemove', handleUserActivity);
+      window.removeEventListener('keydown', handleUserActivity);
+      window.removeEventListener('click', handleUserActivity);
+      if (inactivityTimerRef.current) clearInterval(inactivityTimerRef.current);
     };
   }, [currentUser]);
 
-  // Helper Functions
-  const money = (n) => "GHS " + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Login
+  const login = async (id, password) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, password })
+      });
 
-  const toast = (msg, type) => {
-    const id = Date.now() + Math.random();
-    const newToast = { id, msg, type };
-    setToasts(prev => [...prev, newToast]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 3000);
-  };
-
-  const undoToast = (msg, undoFn) => {
-    const id = Date.now() + Math.random();
-    const newToast = { id, msg, type: 'warning', undoFn };
-    setToasts(prev => [...prev, newToast]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 5000);
-  };
-
-  const removeToast = (id) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
-  };
-
-  const logAction = (user, action, detail) => {
-    setAuditLog(prev => [{ time: new Date().toISOString(), user, action, detail }, ...prev]);
-  };
-
-  const addNotification = (text) => {
-    setNotifications(prev => [{ text, time: new Date().toISOString() }, ...prev]);
-  };
-
-  const checkLowStock = () => {
-    inventory.filter(i => i.stock <= i.minStock).forEach(i => {
-      const exists = notifications.some(n => n.text.includes(i.name) && n.text.includes("Low stock"));
-      if (!exists) {
-        addNotification(`⚠ Low stock: <b>${i.name}</b> — ${i.stock} left (min ${i.minStock})`);
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.setItem('spareiq_token', data.token);
+        setAuthToken(data.token);
+        setCurrentUser(data.user);
+        showToast(`Welcome back, ${data.user.name}!`, 'success');
+        refreshBackendData(data.token);
+        return { success: true };
       }
-    });
-  };
-
-  const setTheme = (mode) => {
-    setThemeState(mode);
-    toast(mode === "dark" ? "Dark mode on" : "Light mode on", "info");
-  };
-
-  const showView = (name) => {
-    if (currentUser && currentUser.role === "cashier" && ["receipts", "upload", "inventory", "suppliers", "employees", "reports", "ai", "audit"].includes(name)) {
-      toast("Your account doesn't have access to that section.", "warning");
-      name = "dashboard";
+    } catch (err) {
+      console.warn('Backend login connection failed, falling back to local verification.');
     }
-    setActiveView(name);
-    setIsMobileMenuOpen(false);
-  };
 
-  const attemptLogin = (id, pass) => {
-    const emp = employees.find(e => e.id === id.trim().toUpperCase());
-    if (!emp || emp.password !== pass) {
-      return { success: false, msg: "Incorrect Employee ID or password." };
-    }
-    if (emp.status === "disabled") {
-      return { success: false, msg: "This account has been disabled by an administrator." };
-    }
+    // Fallback Local Auth
+    const emp = employees.find(e => e.id.toUpperCase() === id.trim().toUpperCase());
+    if (!emp) return { success: false, error: 'Employee ID not found.' };
+    if (emp.status === 'disabled') return { success: false, error: 'Account is disabled. Contact your administrator.' };
+    if (emp.password !== password) return { success: false, error: 'Incorrect password.' };
+
     setCurrentUser(emp);
-    logAction(emp.name, "Logged in", emp.role === "admin" ? "Administrator login" : "Cashier login");
-    setActiveView("dashboard");
-    toast("Welcome back, " + emp.name.split(' ')[0] + "!", "success");
-    
-    // Trigger onboarding tour if not seen
-    if (!tourSeen[emp.role]) {
-      setTourSeen(prev => ({ ...prev, [emp.role]: true }));
-      setTourModalOpen(true);
-    }
-
+    showToast(`Welcome back, ${emp.name}!`, 'success');
     return { success: true };
   };
 
-  const logout = (auto = false) => {
-    if (currentUser) {
-      logAction(currentUser.name, auto ? "Auto logout (inactivity)" : "Logged out", "");
+  // Logout
+  const logout = async (isAuto = false) => {
+    if (authToken) {
+      try {
+        await fetch(`${API_BASE_URL}/auth/logout`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+      } catch (err) {}
     }
+    localStorage.removeItem('spareiq_token');
+    setAuthToken(null);
     setCurrentUser(null);
     setCart([]);
-    if (auto) {
-      toast("Session timed out due to inactivity — logged out for security", "warning");
+    if (isAuto) {
+      showToast('Logged out due to 3 minutes of inactivity.', 'warning');
+    } else {
+      showToast('Logged out successfully.', 'info');
     }
   };
 
-  // Confirmation modal trigger
-  const showConfirm = (title, msg, onYes) => {
-    setConfirmModal({ active: true, title, msg, onYes });
+  // Employee actions
+  const createEmployee = async (data) => {
+    if (authToken) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/employees`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify(data)
+        });
+        if (res.ok) {
+          const newEmp = await res.json();
+          showToast(`Employee ${newEmp.name} (${newEmp.id}) created!`, 'success');
+          refreshBackendData();
+          return newEmp;
+        }
+      } catch (e) {}
+    }
+
+    // Fallback
+    const nextSeq = empSeq + 1;
+    setEmpSeq(nextSeq);
+    const newEmp = {
+      id: `EMP${String(nextSeq).padStart(4, '0')}`,
+      name: data.name,
+      password: data.password || 'cashier123',
+      role: data.role || 'cashier',
+      status: 'active',
+      branch: data.branch || 'Main Shop',
+      created: new Date().toISOString().slice(0, 10)
+    };
+    setEmployees(prev => [...prev, newEmp]);
+    showToast(`Employee ${newEmp.name} (${newEmp.id}) created!`, 'success');
+    return newEmp;
   };
 
-  const closeConfirm = () => {
-    setConfirmModal({ active: false, title: '', msg: '', onYes: null });
+  const resetPassword = async (empId) => {
+    const tempPass = Math.random().toString(36).slice(-8);
+    if (authToken) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/employees/${empId}/password`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({ newPassword: tempPass })
+        });
+        if (res.ok) {
+          showToast(`Password reset for ${empId}. Temporary password: ${tempPass}`, 'warning');
+          return;
+        }
+      } catch (e) {}
+    }
+    showToast(`Password reset for ${empId}. Temporary password: ${tempPass}`, 'warning');
   };
 
-  // Cart / POS actions
-  const addToCart = (code) => {
-    const inv = inventory.find(i => i.code === code);
-    if (!inv || inv.stock <= 0) {
-      toast("This product is out of stock.", "warning");
+  const toggleEmployeeStatus = async (empId) => {
+    const emp = employees.find(e => e.id === empId);
+    if (!emp) return;
+    const nextStatus = emp.status === 'active' ? 'disabled' : 'active';
+
+    if (authToken) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/employees/${empId}/status`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({ status: nextStatus })
+        });
+        if (res.ok) {
+          showToast(`Status updated for ${empId}.`, 'info');
+          refreshBackendData();
+          return;
+        }
+      } catch (e) {}
+    }
+
+    setEmployees(prev => prev.map(e => e.id === empId ? { ...e, status: nextStatus } : e));
+    showToast(`Status updated for ${empId}.`, 'info');
+  };
+
+  // Cart operations
+  const addToCart = (product) => {
+    if (product.stock <= 0) {
+      showToast(`${product.name} is out of stock!`, 'error');
       return;
     }
     setCart(prev => {
-      const existing = prev.find(c => c.code === code);
+      const existing = prev.find(i => i.code === product.code);
       if (existing) {
-        if (existing.qty + 1 > inv.stock) {
-          toast("Not enough stock available.", "warning");
+        if (existing.qty >= product.stock) {
+          showToast(`Cannot add more. Max stock is ${product.stock}.`, 'warning');
           return prev;
         }
-        return prev.map(c => c.code === code ? { ...c, qty: c.qty + 1 } : c);
+        return prev.map(i => i.code === product.code ? { ...i, qty: i.qty + 1, total: (i.qty + 1) * i.sellingPrice } : i);
       }
-      return [...prev, { code: inv.code, name: inv.name, sellingPrice: inv.sellingPrice, costPrice: inv.cost, qty: 1, maxStock: inv.stock }];
+      return [...prev, {
+        code: product.code,
+        name: product.name,
+        sellingPrice: product.sellingPrice,
+        costPrice: product.costPrice || (product.cost || 0),
+        qty: 1,
+        total: product.sellingPrice
+      }];
     });
+    showToast(`Added ${product.name} to cart.`, 'success');
   };
 
-  const updateCartQty = (idx, val) => {
-    setCart(prev => {
-      const copy = [...prev];
-      const item = copy[idx];
-      if (!item) return prev;
-      const qty = Math.max(1, Math.min(+val || 1, item.maxStock));
-      copy[idx] = { ...item, qty };
-      return copy;
-    });
+  const updateCartQty = (code, qty) => {
+    const newQty = parseInt(qty) || 0;
+    if (newQty <= 0) {
+      removeFromCart(code);
+      return;
+    }
+    const product = inventory.find(i => i.code === code);
+    if (product && newQty > product.stock) {
+      showToast(`Only ${product.stock} available in stock.`, 'warning');
+      return;
+    }
+    setCart(prev => prev.map(i => i.code === code ? { ...i, qty: newQty, total: newQty * i.sellingPrice } : i));
   };
 
-  const removeFromCart = (idx) => {
-    setCart(prev => prev.filter((_, i) => i !== idx));
+  const removeFromCart = (code) => {
+    setCart(prev => prev.filter(i => i.code !== code));
   };
 
-  const cancelCart = () => {
-    if (cart.length === 0) return;
-    logAction(currentUser.name, "Sale cancelled", cart.length + " item(s) cleared before checkout");
-    setCart([]);
-    toast("Cart cleared", "info");
-  };
+  const clearCart = () => setCart([]);
 
-  const completeSale = ({ discount, tax, grandTotal, amountPaid, paymentMethod }) => {
-    const subtotal = cart.reduce((s, c) => s + c.qty * c.sellingPrice, 0);
-    const now = new Date();
+  // Complete POS Sale
+  const completeSale = async (saleData) => {
+    if (authToken) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/sales`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({
+            cartItems: cart,
+            subtotal: saleData.subtotal,
+            discount: saleData.discount,
+            tax: saleData.tax,
+            grandTotal: saleData.grandTotal,
+            amountPaid: saleData.amountPaid,
+            balance: saleData.balance,
+            paymentMethod: saleData.paymentMethod
+          })
+        });
 
-    const items = cart.map(c => {
-      // update inventory stock
-      setInventory(prevInv => prevInv.map(inv => {
-        if (inv.code === c.code) {
-          return { ...inv, stock: inv.stock - c.qty, lastUpdated: now.toISOString().slice(0, 10) };
+        if (res.ok) {
+          const completedSale = await res.json();
+          clearCart();
+          showToast(`Sale completed! Receipt: ${completedSale.receiptNo}`, 'success');
+          refreshBackendData();
+          return completedSale;
         }
-        return inv;
-      }));
+      } catch (err) {
+        console.warn('Backend POS checkout failed, using local transaction.');
+      }
+    }
 
-      // stock log
-      setStockLog(prev => [{
-        code: c.code, name: c.name, type: "Sold", change: -c.qty,
-        date: now.toISOString().slice(0, 10), user: currentUser.name
-      }, ...prev]);
-
-      return {
-        code: c.code, name: c.name, qty: c.qty, sellingPrice: c.sellingPrice,
-        costPrice: c.costPrice, total: +(c.qty * c.sellingPrice).toFixed(2),
-        profit: +(c.qty * (c.sellingPrice - c.costPrice)).toFixed(2)
-      };
-    });
+    // Local Fallback
+    const nextSeq = saleSeq + 1;
+    setSaleSeq(nextSeq);
+    const receiptNo = `S-${String(nextSeq).padStart(5, '0')}`;
+    const txnId = `TXN-${String(nextSeq).padStart(5, '0')}`;
 
     const newSale = {
-      id: saleSeq,
-      txnId: "TXN-" + String(saleSeq).padStart(5, "0"),
-      receiptNo: "S-" + String(saleSeq).padStart(5, "0"),
-      date: now.toISOString().slice(0, 10),
-      time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      id: 'SALE-' + Date.now(),
+      txnId,
+      receiptNo,
+      date: new Date().toISOString().slice(0, 10),
+      time: new Date().toTimeString().slice(0, 5),
       empId: currentUser.id,
       empName: currentUser.name,
-      items, subtotal, discount, tax, grandTotal, amountPaid,
-      balance: +(amountPaid - grandTotal).toFixed(2),
-      paymentMethod
+      items: cart.map(i => ({ ...i })),
+      subtotal: saleData.subtotal,
+      discount: saleData.discount,
+      tax: saleData.tax,
+      grandTotal: saleData.grandTotal,
+      amountPaid: saleData.amountPaid,
+      balance: saleData.balance,
+      paymentMethod: saleData.paymentMethod
     };
 
-    setSales(prev => [...prev, newSale]);
-    setSaleSeq(prev => prev + 1);
-    logAction(currentUser.name, "Sale completed", newSale.txnId + " — " + money(grandTotal));
-    checkLowStock();
-    setCart([]);
-    toast("Sale completed — " + newSale.receiptNo, "success");
+    setSales(prev => [newSale, ...prev]);
+    clearCart();
+    showToast(`Sale completed! Receipt: ${receiptNo}`, 'success');
     return newSale;
   };
 
-  // Receipt actions
-  const saveReceipt = (receiptData) => {
-    const newRec = {
-      id: receiptSeq,
-      receiptNo: "R-" + String(receiptSeq).padStart(5, "0"),
-      ...receiptData
-    };
-    setReceipts(prev => [...prev, newRec]);
-    setReceiptSeq(prev => prev + 1);
+  // Save Verified Receipt (Upload Module)
+  const saveVerifiedReceipt = async (receiptData) => {
+    if (authToken) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/receipts`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify(receiptData)
+        });
 
-    if (receiptData.supplier && !suppliersMeta[receiptData.supplier]) {
-      setSuppliersMeta(prev => ({ ...prev, [receiptData.supplier]: { phone: "—", address: "—" } }));
+        if (res.ok) {
+          const saved = await res.json();
+          showToast(`Receipt ${saved.receiptNo} saved & inventory restocked!`, 'success');
+          refreshBackendData();
+          return saved;
+        }
+      } catch (err) {
+        console.warn('Backend receipt save failed, using local fallback.');
+      }
     }
 
-    // Auto restock matched items
-    receiptData.items.forEach(i => {
-      if (i.code && i.code !== "NEW") {
-        setInventory(prevInv => prevInv.map(inv => {
-          if (inv.code === i.code) {
-            const updatedCost = i.unitPrice > 0 ? i.unitPrice : inv.cost;
-            return { ...inv, stock: inv.stock + i.qty, cost: updatedCost, lastUpdated: receiptData.date };
-          }
-          return inv;
-        }));
-        setStockLog(prev => [{
-          code: i.code, name: i.name, type: "Purchased", change: i.qty,
-          date: receiptData.date, user: currentUser ? currentUser.name : "System"
-        }, ...prev]);
-      }
-    });
+    // Local Fallback
+    const nextSeq = receiptSeq + 1;
+    setReceiptSeq(nextSeq);
+    const rNo = `R-${String(nextSeq).padStart(5, '0')}`;
 
-    logAction(currentUser ? currentUser.name : "System", "Receipt uploaded", newRec.receiptNo + " — " + newRec.supplier + " — " + money(newRec.grandTotal));
-    checkLowStock();
-    toast(newRec.status === 'duplicate' ? "Saved — flagged as possible duplicate" : "Receipt saved successfully — matched inventory stock updated", newRec.status === 'duplicate' ? "warning" : "success");
-    showView("receipts");
-  };
-
-  const deleteReceipt = (id) => {
-    const r = receipts.find(x => x.id === id);
-    if (!r) return;
-    showConfirm("Delete receipt?", `Delete receipt ${r.receiptNo} from ${r.supplier}? You can undo this for a few seconds after.`, () => {
-      setReceipts(prev => prev.filter(x => x.id !== id));
-      logAction(currentUser ? currentUser.name : "System", "Receipt deleted", r.receiptNo + " — " + r.supplier);
-
-      undoToast(r.receiptNo + " deleted", () => {
-        setReceipts(prev => [...prev, r]);
-        logAction(currentUser ? currentUser.name : "System", "Delete undone", "Restored " + r.receiptNo);
-      });
-    });
-  };
-
-  // Inventory Actions
-  const createInventoryItem = (itemData) => {
-    const item = {
-      ...itemData,
-      dateAdded: new Date().toISOString().slice(0, 10),
-      lastUpdated: new Date().toISOString().slice(0, 10)
+    const newReceipt = {
+      id: 'REC-' + Date.now(),
+      receiptNo: rNo,
+      supplier: receiptData.supplier,
+      invoiceNo: receiptData.invoiceNo,
+      date: receiptData.date,
+      time: receiptData.time,
+      currency: receiptData.currency || 'GHS',
+      subtotal: receiptData.subtotal,
+      discount: receiptData.discount,
+      tax: receiptData.tax,
+      grandTotal: receiptData.grandTotal,
+      notes: receiptData.notes,
+      imageDataUrl: receiptData.imageDataUrl,
+      items: receiptData.items || []
     };
-    setInventory(prev => [...prev, item]);
-    setStockLog(prev => [{
-      code: item.code, name: item.name, type: "Manual Add", change: item.stock,
-      date: item.dateAdded, user: currentUser.name
-    }, ...prev]);
-    logAction(currentUser.name, "Product added", item.code + " — " + item.name + " (manual entry)");
-    checkLowStock();
-    toast(item.name + " added to inventory", "success");
+
+    setReceipts(prev => [newReceipt, ...prev]);
+    showToast(`Receipt ${rNo} saved successfully!`, 'success');
+    return newReceipt;
   };
 
-  const deleteInventoryItem = (code) => {
-    const inv = inventory.find(i => i.code === code);
-    if (!inv) return;
-    showConfirm("Delete product?", `Delete "${inv.name}" (${inv.code}) from inventory? You can undo this for a few seconds after.`, () => {
-      setInventory(prev => prev.filter(i => i.code !== code));
-      logAction(currentUser ? currentUser.name : "System", "Product deleted", inv.code + " — " + inv.name);
-
-      undoToast(inv.name + " deleted", () => {
-        setInventory(prev => [...prev, inv]);
-        logAction(currentUser ? currentUser.name : "System", "Delete undone", "Restored " + inv.name);
-      });
-    });
-  };
-
-  const updateInvPrice = (code, field, val) => {
-    const newVal = +val || 0;
-    setInventory(prev => prev.map(inv => {
-      if (inv.code === code) {
-        const oldVal = inv[field];
-        if (oldVal === newVal) return inv;
-        const label = field === "cost" ? "Cost price" : "Selling price";
-        logAction(currentUser ? currentUser.name : "System", "Price changed", `${label} for ${inv.name}: ${oldVal.toFixed(2)} → ${newVal.toFixed(2)}`);
-        addNotification(`💲 ${label} changed for <b>${inv.name}</b>: ${money(oldVal)} → ${money(newVal)}`);
-        toast(label + " updated for " + inv.name, "info");
-        return { ...inv, [field]: newVal, lastUpdated: new Date().toISOString().slice(0, 10) };
-      }
-      return inv;
-    }));
-  };
-
-  const importInventoryCSV = (parsedData) => {
-    let added = 0;
-    const newItems = [];
-    parsedData.forEach(row => {
-      const code = row.code || row.Code || row["Product Code"];
-      const name = row.name || row.Name || row["Product Name"];
-      if (!code || !name) return;
-      newItems.push({
-        code, name,
-        desc: row.desc || row.Description || "",
-        models: row.models || row["Compatible Models"] || "",
-        unit: row.unit || "pc",
-        cost: +(row.cost || row["Current Cost"] || 0),
-        sellingPrice: +(row.sellingPrice || row["Selling Price"] || (+(row.cost || row["Current Cost"] || 0)) * 1.4),
-        stock: +(row.stock || row.Stock || 0),
-        minStock: +(row.minStock || row["Minimum Stock"] || 5),
-        category: row.category || row.Category || "General",
-        barcode: row.barcode || row.Barcode || "",
-        status: "active",
-        dateAdded: new Date().toISOString().slice(0, 10),
-        lastUpdated: new Date().toISOString().slice(0, 10)
-      });
-      added++;
-    });
-    setInventory(prev => [...prev, ...newItems]);
-    toast(added + " inventory items imported", "success");
-    logAction(currentUser ? currentUser.name : "System", "Inventory imported", added + " items via CSV");
-  };
-
-  // Employees Actions
-  const createEmployee = ({ name, role, branch, password }) => {
-    const nextSeq = empSeq + 1;
-    setEmpSeq(nextSeq);
-    const id = "EMP" + String(nextSeq).padStart(4, "0");
-    const emp = { id, name, password: password || "changeme123", role, branch: branch || "Main Shop", status: "active", created: new Date().toISOString().slice(0, 10) };
-    setEmployees(prev => [...prev, emp]);
-    logAction(currentUser.name, "Employee created", id + " — " + name + " (" + emp.role + ")");
-    addNotification(`👤 New employee created: <b>${name}</b> (${id})`);
-    toast("Employee " + id + " created", "success");
-  };
-
-  const resetPassword = (id) => {
-    const newPass = Math.random().toString(36).slice(-8);
-    setEmployees(prev => prev.map(e => e.id === id ? { ...e, password: newPass } : e));
-    const emp = employees.find(e => e.id === id);
-    logAction(currentUser.name, "Password reset", "Reset password for " + id + " (" + (emp ? emp.name : '') + ")");
-    toast(`New password for ${id}: ${newPass}`, "success");
-  };
-
-  const toggleEmployeeStatus = (id) => {
-    if (id === currentUser.id) {
-      toast("You can't disable your own account.", "error");
-      return;
+  // Inventory actions
+  const createInventoryItem = async (itemData) => {
+    if (authToken) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/inventory`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify(itemData)
+        });
+        if (res.ok) {
+          const newItem = await res.json();
+          showToast(`Item ${newItem.code} created!`, 'success');
+          refreshBackendData();
+          return newItem;
+        }
+      } catch (e) {}
     }
-    setEmployees(prev => prev.map(e => {
-      if (e.id === id) {
-        const nextStatus = e.status === "active" ? "disabled" : "active";
-        logAction(currentUser.name, nextStatus === "active" ? "Employee enabled" : "Employee disabled", id + " — " + e.name);
-        toast(e.name + " is now " + nextStatus, "warning");
-        return { ...e, status: nextStatus };
-      }
-      return e;
-    }));
+
+    setInventory(prev => [...prev, { ...itemData, status: 'active' }]);
+    showToast(`Item ${itemData.code} created!`, 'success');
   };
 
-  const saveShopProfile = (newProfile) => {
-    setShopProfile(prev => ({ ...prev, ...newProfile }));
-    logAction(currentUser.name, "Shop profile updated", newProfile.name || shopProfile.name);
-    toast("Shop profile saved — it will now appear on printed receipts and reports", "success");
+  const updateItemPrice = async (code, costPrice, sellingPrice) => {
+    if (authToken) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/inventory/${code}/price`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({ costPrice, sellingPrice })
+        });
+        if (res.ok) {
+          showToast(`Price updated for ${code}.`, 'success');
+          refreshBackendData();
+          return;
+        }
+      } catch (e) {}
+    }
+
+    setInventory(prev => prev.map(i => i.code === code ? { ...i, costPrice, sellingPrice } : i));
+    showToast(`Price updated for ${code}.`, 'success');
   };
 
+  const deleteInventoryItem = async (code) => {
+    if (authToken) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/inventory/${code}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (res.ok) {
+          showToast(`Item ${code} disabled.`, 'warning');
+          refreshBackendData();
+          return;
+        }
+      } catch (e) {}
+    }
+
+    setInventory(prev => prev.filter(i => i.code !== code));
+    showToast(`Item ${code} removed.`, 'warning');
+  };
+
+  // Settings
+  const updateShopProfile = async (data) => {
+    if (authToken) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/settings/shop-profile`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify(data)
+        });
+        if (res.ok) {
+          const updated = await res.json();
+          setShopProfile(updated);
+          showToast('Shop profile updated!', 'success');
+          return;
+        }
+      } catch (e) {}
+    }
+
+    setShopProfile(prev => ({ ...prev, ...data }));
+    showToast('Shop profile updated!', 'success');
+  };
+
+  // Context value bundle
   const value = {
-    theme, setTheme,
-    currentUser, attemptLogin, logout,
-    activeView, showView,
-    isMobileMenuOpen, setIsMobileMenuOpen,
-    toasts, toast, undoToast, removeToast,
-    notifications, isNotifOpen, setIsNotifOpen,
-    inventory, createInventoryItem, deleteInventoryItem, updateInvPrice, importInventoryCSV,
-    receipts, saveReceipt, deleteReceipt,
-    suppliersMeta, SUPPLIERS,
-    employees, createEmployee, resetPassword, toggleEmployeeStatus,
-    sales, completeSale,
-    stockLog, auditLog, logAction,
-    cart, addToCart, updateCartQty, removeFromCart, cancelCart,
-    shopProfile, saveShopProfile,
-    lightboxImg, setLightboxImg,
-    confirmModal, closeConfirm,
-    tourModalOpen, setTourModalOpen,
-    sessionCountdown, SESSION_TIMEOUT_SECONDS,
-    money
+    theme,
+    setTheme,
+    currentUser,
+    activeView,
+    setActiveView,
+    isMobileMenuOpen,
+    setIsMobileMenuOpen,
+    toasts,
+    showToast,
+    toast,
+    notifications,
+    isNotifOpen,
+    setIsNotifOpen,
+    inventory,
+    setInventory,
+    receipts,
+    setReceipts,
+    suppliersMeta,
+    employees,
+    setEmployees,
+    createEmployee,
+    resetPassword,
+    toggleEmployeeStatus,
+    createInventoryItem,
+    updateItemPrice,
+    deleteInventoryItem,
+    sales,
+    stockLog,
+    auditLog,
+    logAudit,
+    cart,
+    addToCart,
+    updateCartQty,
+    removeFromCart,
+    clearCart,
+    completeSale,
+    saveVerifiedReceipt,
+    shopProfile,
+    setShopProfile,
+    updateShopProfile,
+    lightboxImg,
+    setLightboxImg,
+    confirmModal,
+    setConfirmModal,
+    tourModalOpen,
+    setTourModalOpen,
+    tourSeen,
+    setTourSeen,
+    sessionCountdown,
+    money,
+    login,
+    logout,
+    refreshBackendData
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };
 
-export const useApp = () => useContext(AppContext);
+export const useApp = () => {
+  const context = useContext(AppContext);
+  if (!context) throw new Error('useApp must be used within an AppProvider');
+  return context;
+};

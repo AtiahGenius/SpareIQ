@@ -1,0 +1,177 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Employee {
+  id           String     @id // e.g. "EMP0001"
+  name         String
+  passwordHash String
+  role         String     @default("cashier") // "admin" | "cashier"
+  status       String     @default("active")  // "active" | "disabled"
+  branch       String     @default("Main Shop")
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  sales        Sale[]
+  auditLogs    AuditLog[]
+  receipts     Receipt[]
+}
+
+model ShopProfile {
+  id        Int      @id @default(1)
+  name      String   @default("SpareIQ Parts Shop")
+  address   String   @default("Abossey Okai, Accra")
+  phone     String   @default("+233 24 000 0000")
+  logo      String?
+  updatedAt DateTime @updatedAt
+}
+
+model InventoryItem {
+  id           String   @id @default(uuid())
+  code         String   @unique
+  barcode      String?
+  name         String
+  description  String?
+  category     String   @default("General")
+  models       String?  // Compatible bike models
+  unit         String   @default("pc")
+  costPrice    Float
+  sellingPrice Float
+  stock        Int      @default(0)
+  minStock     Int      @default(5)
+  status       String   @default("active") // "active" | "disabled"
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  receiptItems ReceiptItem[]
+  saleItems    SaleItem[]
+  stockLogs    StockLog[]
+}
+
+model Supplier {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  phone     String?
+  address   String?
+  createdAt DateTime  @default(now())
+
+  receipts  Receipt[]
+}
+
+model Receipt {
+  id           Int      @id @default(autoincrement())
+  receiptNo    String   @unique // e.g. "R-00001"
+  invoiceNo    String
+  supplierId   String
+  supplier     Supplier @relation(fields: [supplierId], references: [id])
+  date         String
+  time         String
+  currency     String   @default("GHS")
+  subtotal     Float
+  discount     Float    @default(0)
+  tax          Float    @default(0)
+  grandTotal   Float
+  notes        String?
+  imageDataUrl String?  // Photo Data URL or File Path
+  status       String   @default("verified") // "verified" | "duplicate"
+  uploadedById String?
+  uploadedBy   Employee? @relation(fields: [uploadedById], references: [id])
+  createdAt    DateTime @default(now())
+
+  items        ReceiptItem[]
+}
+
+model ReceiptItem {
+  id              String         @id @default(uuid())
+  receiptId       Int
+  receipt         Receipt        @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  inventoryItemId String?
+  inventoryItem   InventoryItem? @relation(fields: [inventoryItemId], references: [id])
+  code            String
+  name            String
+  qty             Int
+  unitPrice       Float
+  total           Float
+}
+
+model Sale {
+  id            Int      @id @default(autoincrement())
+  txnId         String   @unique // e.g. "TXN-00001"
+  receiptNo     String   @unique // e.g. "S-00001"
+  date          String
+  time          String
+  empId         String
+  employee      Employee @relation(fields: [empId], references: [id])
+  subtotal      Float
+  discount      Float    @default(0)
+  tax           Float    @default(0)
+  grandTotal    Float
+  amountPaid    Float
+  balance       Float
+  paymentMethod String   @default("CASH") // "CASH" | "MOMO" | "BANK" | "MIXED"
+  createdAt     DateTime @default(now())
+
+  items         SaleItem[]
+}
+
+model SaleItem {
+  id              String        @id @default(uuid())
+  saleId          Int
+  sale            Sale          @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  inventoryItemId String
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id])
+  code            String
+  name            String
+  qty             Int
+  sellingPrice    Float
+  costPrice       Float
+  total           Float
+  profit          Float
+}
+
+model StockLog {
+  id              String        @id @default(uuid())
+  inventoryItemId String
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  code            String
+  name            String
+  type            String        // "PURCHASED" | "SOLD" | "MANUAL_ADD" | "ADJUSTMENT"
+  change          Int
+  date            DateTime      @default(now())
+  user            String
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  timestamp DateTime @default(now())
+  user      String
+  action    String
+  detail    String?
+  empId     String?
+  employee  Employee? @relation(fields: [empId], references: [id])
+}
+
+model SyncOutbox {
+  id           String    @id @default(uuid())
+  entityType   String    // "Sale", "Receipt", "InventoryItem", "StockLog", "AuditLog"
+  entityId     String
+  operation    String    // "CREATE", "UPDATE", "DELETE"
+  payloadJson  String
+  status       String    @default("PENDING") // "PENDING", "SYNCING", "SYNCED", "FAILED"
+  retryCount   Int       @default(0)
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+  syncedAt     DateTime?
+}
+
+model SyncMetadata {
+  id               Int       @id @default(1)
+  lastSyncedAt     DateTime?
+  lastServerAnchor String?
+  isOnline         Boolean   @default(false)
+}

@@ -1,0 +1,11 @@
+{
+  "name": "spareiq-workspace",
+  "version": "1.0.0",
+  "description": "SpareIQ Inventory & Sales Management Solution",
+  "scripts": {
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev:server": "npm run dev --prefix server",
+    "build:frontend": "npm run build --prefix frontend",
+    "start:server": "npm start --prefix server"
+  }
+}
