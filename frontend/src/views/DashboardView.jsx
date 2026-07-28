@@ -46,7 +46,7 @@ export const DashboardView = ({ onOpenReceiptModal, onOpenSaleModal }) => {
     const weekAgo = new Date(Date.now() - 7 * 86400000);
     const weekSales = mySales.filter(s => new Date(s.date) >= weekAgo);
     const monthSales = mySales.filter(s => new Date(s.date).getMonth() === now.getMonth() && new Date(s.date).getFullYear() === now.getFullYear());
-    const itemsToday = todaySales.reduce((s, t) => s + t.items.reduce((a, i) => a + i.qty, 0), 0);
+    const itemsToday = todaySales.reduce((s, t) => s + (t.items || []).reduce((a, i) => a + (i.qty || 0), 0), 0);
 
     return (
       <div className="view active">
@@ -106,7 +106,7 @@ export const DashboardView = ({ onOpenReceiptModal, onOpenSaleModal }) => {
                       <tr key={s.id}>
                         <td className="mono">{s.txnId}</td>
                         <td>{s.date} {s.time}</td>
-                        <td>{s.items.reduce((a, i) => a + i.qty, 0)}</td>
+                        <td>{(s.items || []).reduce((a, i) => a + (i.qty || 0), 0)}</td>
                         <td className="mono">{money(s.grandTotal)}</td>
                         <td>
                           <button className="btn btn-sm" onClick={() => onOpenSaleModal(s)}>Print</button>
@@ -131,14 +131,14 @@ export const DashboardView = ({ onOpenReceiptModal, onOpenSaleModal }) => {
   const totalReceipts = receipts.length;
   const totalSpend = receipts.reduce((s, r) => s + r.grandTotal, 0);
 
-  const revenueToday = sales.filter(s => s.date === today).reduce((s, t) => s + t.grandTotal, 0);
-  const revenueMonth = sales.filter(s => new Date(s.date).getMonth() === now.getMonth() && new Date(s.date).getFullYear() === now.getFullYear()).reduce((s, t) => s + t.grandTotal, 0);
-  const profitToday = sales.filter(s => s.date === today).reduce((s, t) => s + t.items.reduce((a, i) => a + i.profit, 0), 0);
-  const profitMonth = sales.filter(s => new Date(s.date).getMonth() === now.getMonth() && new Date(s.date).getFullYear() === now.getFullYear()).reduce((s, t) => s + t.items.reduce((a, i) => a + i.profit, 0), 0);
+  const revenueToday = sales.filter(s => s.date === today).reduce((s, t) => s + (t.grandTotal || 0), 0);
+  const revenueMonth = sales.filter(s => new Date(s.date).getMonth() === now.getMonth() && new Date(s.date).getFullYear() === now.getFullYear()).reduce((s, t) => s + (t.grandTotal || 0), 0);
+  const profitToday = sales.filter(s => s.date === today).reduce((s, t) => s + (t.items || []).reduce((a, i) => a + (i.profit || 0), 0), 0);
+  const profitMonth = sales.filter(s => new Date(s.date).getMonth() === now.getMonth() && new Date(s.date).getFullYear() === now.getFullYear()).reduce((s, t) => s + (t.items || []).reduce((a, i) => a + (i.profit || 0), 0), 0);
   
   const lowStock = inventory.filter(i => i.stock <= i.minStock);
-  const inventoryValue = inventory.reduce((s, i) => s + i.stock * i.cost, 0);
-  const productCount = new Set(receipts.flatMap(r => r.items.map(i => i.name))).size;
+  const inventoryValue = inventory.reduce((s, i) => s + (i.stock || 0) * (i.cost || i.costPrice || 0), 0);
+  const productCount = new Set(receipts.flatMap(r => (r.items || []).map(i => i.name))).size;
 
   // Monthly chart data
   const months = [];

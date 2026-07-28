@@ -36,16 +36,20 @@ export const PosView = ({ onOpenSaleModal }) => {
     setCheckoutModalOpen(true);
   };
 
-  const handleCompleteSale = () => {
-    const sale = completeSale({
+  const handleCompleteSale = async () => {
+    const sale = await completeSale({
+      subtotal: cartSubtotal,
       discount: +discount || 0,
       tax: +tax || 0,
       grandTotal: checkoutGrandTotal,
       amountPaid: +amountPaid || 0,
+      balance: balance,
       paymentMethod
     });
     setCheckoutModalOpen(false);
-    onOpenSaleModal(sale);
+    if (sale) {
+      onOpenSaleModal(sale);
+    }
   };
 
   return (
@@ -97,19 +101,19 @@ export const PosView = ({ onOpenSaleModal }) => {
           <div className="cart-items">
             {cart.length > 0 ? (
               cart.map((c, idx) => (
-                <div className="cart-row" key={c.code}>
+                <div className="cart-row" key={c.code || idx}>
                   <div className="cname">
-                    {c.name}
-                    <small>{money(c.sellingPrice)} each &middot; locked price</small>
+                    {c.name || 'Product'}
+                    <small>{money(c.sellingPrice || 0)} each &middot; locked price</small>
                   </div>
                   <input
                     type="number"
                     min="1"
-                    max={c.maxStock}
+                    max={c.maxStock || c.stock || 999}
                     value={c.qty}
-                    onChange={(e) => updateCartQty(idx, e.target.value)}
+                    onChange={(e) => updateCartQty(c.code || idx, e.target.value)}
                   />
-                  <button className="btn btn-sm btn-ghost" onClick={() => removeFromCart(idx)}>✕</button>
+                  <button className="btn btn-sm btn-ghost" onClick={() => removeFromCart(c.code || idx)}>✕</button>
                 </div>
               ))
             ) : (

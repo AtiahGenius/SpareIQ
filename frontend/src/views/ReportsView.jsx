@@ -33,16 +33,17 @@ export const ReportsView = () => {
     }
     if (kind === "products") {
       const map = {};
-      receipts.forEach(r => r.items.forEach(i => { map[i.name] = (map[i.name] || 0) + i.qty; }));
+      receipts.forEach(r => (r.items || []).forEach(i => { map[i.name] = (map[i.name] || 0) + (i.qty || 0); }));
       return Object.entries(map).sort((a, b) => b[1] - a[1]).map(([name, qty]) => ({ Product: name, "Total Quantity": qty }));
     }
     if (kind === "profit") {
       const map = {};
-      sales.forEach(s => s.items.forEach(i => {
-        if (!map[i.name]) map[i.name] = { qty: 0, revenue: 0, profit: 0 };
-        map[i.name].qty += i.qty;
-        map[i.name].revenue += i.total;
-        map[i.name].profit += i.profit;
+      sales.forEach(s => (s.items || []).forEach(i => {
+        const itemName = i.name || i.code || 'Item';
+        if (!map[itemName]) map[itemName] = { qty: 0, revenue: 0, profit: 0 };
+        map[itemName].qty += (i.qty || 0);
+        map[itemName].revenue += (i.total || 0);
+        map[itemName].profit += (i.profit || 0);
       }));
       return Object.entries(map).sort((a, b) => b[1].profit - a[1].profit).map(([name, v]) => ({
         Product: name, "Qty Sold": v.qty, Revenue: v.revenue.toFixed(2), Profit: v.profit.toFixed(2)

@@ -7,15 +7,15 @@ export const LoginScreen = () => {
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     if (e) e.preventDefault();
     if (!empId || !password) {
       setErrorMsg('Please enter both Employee ID and password.');
       return;
     }
-    const res = attemptLogin(empId, password);
-    if (!res.success) {
-      setErrorMsg(res.msg);
+    const res = await attemptLogin(empId, password);
+    if (!res || !res.success) {
+      setErrorMsg((res && (res.msg || res.error)) || 'Login failed. Please check credentials.');
     } else {
       setErrorMsg('');
     }

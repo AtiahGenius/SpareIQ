@@ -27,13 +27,13 @@ export const AiAssistantView = () => {
   const smartSearch = (q) => {
     const ql = q.toLowerCase();
     return receipts.filter(r =>
-      r.supplier.toLowerCase().includes(ql) ||
-      r.invoiceNo.toLowerCase().includes(ql) ||
-      r.receiptNo.toLowerCase().includes(ql) ||
-      r.date.includes(ql) ||
-      String(r.grandTotal).includes(ql) ||
-      r.items.some(i => i.name.toLowerCase().includes(ql) || i.code.toLowerCase().includes(ql)) ||
-      new Date(r.date).toLocaleString('default', { month: 'long' }).toLowerCase().includes(ql)
+      (r.supplier || '').toLowerCase().includes(ql) ||
+      (r.invoiceNo || '').toLowerCase().includes(ql) ||
+      (r.receiptNo || '').toLowerCase().includes(ql) ||
+      (r.date || '').includes(ql) ||
+      String(r.grandTotal || 0).includes(ql) ||
+      (r.items || []).some(i => (i.name || '').toLowerCase().includes(ql) || (i.code || '').toLowerCase().includes(ql)) ||
+      (r.date ? new Date(r.date).toLocaleString('default', { month: 'long' }).toLowerCase().includes(ql) : false)
     );
   };
 

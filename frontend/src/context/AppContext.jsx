@@ -167,7 +167,22 @@ export const AppProvider = ({ children }) => {
       const invRes = await fetch(`${API_BASE_URL}/inventory`, { headers });
       if (invRes.ok) {
         const invData = await invRes.json();
-        if (Array.isArray(invData) && invData.length > 0) setInventory(invData);
+        if (Array.isArray(invData) && invData.length > 0) {
+          const normalized = invData.map(i => {
+            const costVal = Number(i.cost ?? i.costPrice ?? 0);
+            const sellingVal = Number(i.sellingPrice ?? i.price ?? 0);
+            const descVal = i.desc ?? i.description ?? '';
+            return {
+              ...i,
+              cost: costVal,
+              costPrice: costVal,
+              sellingPrice: sellingVal,
+              desc: descVal,
+              description: descVal
+            };
+          });
+          setInventory(normalized);
+        }
       }
 
       // Receipts
@@ -251,6 +266,10 @@ export const AppProvider = ({ children }) => {
         showToast(`Welcome back, ${data.user.name}!`, 'success');
         refreshBackendData(data.token);
         return { success: true };
+      } else {
+        const data = await res.json().catch(() => ({}));
+        const errMsg = data.error || data.message || 'Invalid Employee ID or password.';
+        return { success: false, error: errMsg, msg: errMsg };
       }
     } catch (err) {
       console.warn('Backend login connection failed, falling back to local verification.');
@@ -258,9 +277,9 @@ export const AppProvider = ({ children }) => {
 
     // Fallback Local Auth
     const emp = employees.find(e => e.id.toUpperCase() === id.trim().toUpperCase());
-    if (!emp) return { success: false, error: 'Employee ID not found.' };
-    if (emp.status === 'disabled') return { success: false, error: 'Account is disabled. Contact your administrator.' };
-    if (emp.password !== password) return { success: false, error: 'Incorrect password.' };
+    if (!emp) return { success: false, error: 'Employee ID not found.', msg: 'Employee ID not found.' };
+    if (emp.status === 'disabled') return { success: false, error: 'Account is disabled. Contact your administrator.', msg: 'Account is disabled. Contact your administrator.' };
+    if (emp.password !== password) return { success: false, error: 'Incorrect password.', msg: 'Incorrect password.' };
 
     setCurrentUser(emp);
     showToast(`Welcome back, ${emp.name}!`, 'success');
@@ -375,54 +394,108 @@ export const AppProvider = ({ children }) => {
   };
 
   // Cart operations
-  const addToCart = (product) => {
-    if (product.stock <= 0) {
-      showToast(`${product.name} is out of stock!`, 'error');
+  const addToCart = (productOrCode) => {
+    const product = typeof productOrCode === 'string'
+      ? inventory.find(i => i.code === productOrCode)
+      : productOrCode;
+
+    if (!product) {
+      showToast('Product not found.', 'error');
       return;
     }
+
+    const stock = Number(product.stock ?? 0);
+    const sellingPrice = Number(product.sellingPrice ?? product.price ?? 0);
+    const costPrice = Number(product.costPrice ?? product.cost ?? 0);
+
+    if (stock <= 0) {
+      showToast(`${product.name || 'Product'} is out of stock!`, 'error');
+      return;
+    }
+
     setCart(prev => {
       const existing = prev.find(i => i.code === product.code);
       if (existing) {
-        if (existing.qty >= product.stock) {
-          showToast(`Cannot add more. Max stock is ${product.stock}.`, 'warning');
+        if (existing.qty >= stock) {
+          showToast(`Cannot add more. Max stock is ${stock}.`, 'warning');
           return prev;
         }
-        return prev.map(i => i.code === product.code ? { ...i, qty: i.qty + 1, total: (i.qty + 1) * i.sellingPrice } : i);
+        return prev.map(i => i.code === product.code ? {
+          ...i,
+          qty: i.qty + 1,
+          total: (i.qty + 1) * sellingPrice
+        } : i);
       }
       return [...prev, {
         code: product.code,
         name: product.name,
-        sellingPrice: product.sellingPrice,
-        costPrice: product.costPrice || (product.cost || 0),
+        sellingPrice: sellingPrice,
+        costPrice: costPrice,
+        stock: stock,
+        maxStock: stock,
         qty: 1,
-        total: product.sellingPrice
+        total: sellingPrice
       }];
     });
+
     showToast(`Added ${product.name} to cart.`, 'success');
   };
 
-  const updateCartQty = (code, qty) => {
-    const newQty = parseInt(qty) || 0;
-    if (newQty <= 0) {
-      removeFromCart(code);
-      return;
-    }
-    const product = inventory.find(i => i.code === code);
-    if (product && newQty > product.stock) {
-      showToast(`Only ${product.stock} available in stock.`, 'warning');
-      return;
-    }
-    setCart(prev => prev.map(i => i.code === code ? { ...i, qty: newQty, total: newQty * i.sellingPrice } : i));
+  const updateCartQty = (codeOrIdx, qty) => {
+    const newQty = parseInt(qty, 10) || 0;
+    setCart(prev => {
+      let targetCode = codeOrIdx;
+      if (typeof codeOrIdx === 'number') {
+        const item = prev[codeOrIdx];
+        if (!item) return prev;
+        targetCode = item.code;
+      }
+      if (newQty <= 0) {
+        return prev.filter(i => i.code !== targetCode);
+      }
+      const product = inventory.find(i => i.code === targetCode);
+      const maxStock = product ? Number(product.stock ?? 9999) : 9999;
+      if (newQty > maxStock) {
+        showToast(`Only ${maxStock} available in stock.`, 'warning');
+        return prev;
+      }
+      return prev.map(i => i.code === targetCode ? {
+        ...i,
+        qty: newQty,
+        total: newQty * (i.sellingPrice || 0)
+      } : i);
+    });
   };
 
-  const removeFromCart = (code) => {
-    setCart(prev => prev.filter(i => i.code !== code));
+  const removeFromCart = (codeOrIdx) => {
+    setCart(prev => {
+      if (typeof codeOrIdx === 'number') {
+        return prev.filter((_, idx) => idx !== codeOrIdx);
+      }
+      return prev.filter(i => i.code !== codeOrIdx);
+    });
   };
 
   const clearCart = () => setCart([]);
 
   // Complete POS Sale
   const completeSale = async (saleData) => {
+    const calculatedSubtotal = saleData.subtotal ?? cart.reduce((s, c) => s + (c.qty * (c.sellingPrice || 0)), 0);
+    const calculatedGrandTotal = saleData.grandTotal ?? calculatedSubtotal;
+    const calculatedAmountPaid = saleData.amountPaid ?? calculatedGrandTotal;
+    const calculatedBalance = saleData.balance ?? (calculatedAmountPaid - calculatedGrandTotal);
+    const currentCartItems = [...cart];
+
+    // Instantly update local inventory stock for responsive UI
+    setInventory(prevInv => prevInv.map(invItem => {
+      const cartItem = currentCartItems.find(c => c.code === invItem.code);
+      if (cartItem) {
+        const newStock = Math.max(0, (invItem.stock || 0) - (cartItem.qty || 1));
+        return { ...invItem, stock: newStock };
+      }
+      return invItem;
+    }));
+
     if (authToken) {
       try {
         const res = await fetch(`${API_BASE_URL}/sales`, {
@@ -432,14 +505,14 @@ export const AppProvider = ({ children }) => {
             'Authorization': `Bearer ${authToken}`
           },
           body: JSON.stringify({
-            cartItems: cart,
-            subtotal: saleData.subtotal,
-            discount: saleData.discount,
-            tax: saleData.tax,
-            grandTotal: saleData.grandTotal,
-            amountPaid: saleData.amountPaid,
-            balance: saleData.balance,
-            paymentMethod: saleData.paymentMethod
+            cartItems: currentCartItems,
+            subtotal: calculatedSubtotal,
+            discount: saleData.discount || 0,
+            tax: saleData.tax || 0,
+            grandTotal: calculatedGrandTotal,
+            amountPaid: calculatedAmountPaid,
+            balance: calculatedBalance,
+            paymentMethod: saleData.paymentMethod || 'Cash'
           })
         });
 
@@ -447,8 +520,11 @@ export const AppProvider = ({ children }) => {
           const completedSale = await res.json();
           clearCart();
           showToast(`Sale completed! Receipt: ${completedSale.receiptNo}`, 'success');
-          refreshBackendData();
-          return completedSale;
+          refreshBackendData(authToken);
+          return {
+            ...completedSale,
+            items: completedSale.items || currentCartItems
+          };
         }
       } catch (err) {
         console.warn('Backend POS checkout failed, using local transaction.');
@@ -467,16 +543,30 @@ export const AppProvider = ({ children }) => {
       receiptNo,
       date: new Date().toISOString().slice(0, 10),
       time: new Date().toTimeString().slice(0, 5),
-      empId: currentUser.id,
-      empName: currentUser.name,
-      items: cart.map(i => ({ ...i })),
-      subtotal: saleData.subtotal,
-      discount: saleData.discount,
-      tax: saleData.tax,
-      grandTotal: saleData.grandTotal,
-      amountPaid: saleData.amountPaid,
-      balance: saleData.balance,
-      paymentMethod: saleData.paymentMethod
+      empId: currentUser?.id || 'EMP0001',
+      empName: currentUser?.name || 'Cashier',
+      items: currentCartItems.map(i => {
+        const qty = Number(i.qty || 1);
+        const sellingPrice = Number(i.sellingPrice || 0);
+        const costPrice = Number(i.costPrice || i.cost || 0);
+        const total = Number(i.total ?? (qty * sellingPrice));
+        const profit = total - (qty * costPrice);
+        return {
+          ...i,
+          qty,
+          sellingPrice,
+          costPrice,
+          total,
+          profit
+        };
+      }),
+      subtotal: calculatedSubtotal,
+      discount: saleData.discount || 0,
+      tax: saleData.tax || 0,
+      grandTotal: calculatedGrandTotal,
+      amountPaid: calculatedAmountPaid,
+      balance: calculatedBalance,
+      paymentMethod: saleData.paymentMethod || 'Cash'
     };
 
     setSales(prev => [newSale, ...prev]);
@@ -487,6 +577,17 @@ export const AppProvider = ({ children }) => {
 
   // Save Verified Receipt (Upload Module)
   const saveVerifiedReceipt = async (receiptData) => {
+    // Instantly update inventory stock in local state for restocked items
+    if (Array.isArray(receiptData.items)) {
+      setInventory(prevInv => prevInv.map(invItem => {
+        const rItem = receiptData.items.find(i => i.code === invItem.code);
+        if (rItem) {
+          return { ...invItem, stock: (invItem.stock || 0) + (Number(rItem.qty) || 0) };
+        }
+        return invItem;
+      }));
+    }
+
     if (authToken) {
       try {
         const res = await fetch(`${API_BASE_URL}/receipts`, {
@@ -501,7 +602,7 @@ export const AppProvider = ({ children }) => {
         if (res.ok) {
           const saved = await res.json();
           showToast(`Receipt ${saved.receiptNo} saved & inventory restocked!`, 'success');
-          refreshBackendData();
+          refreshBackendData(authToken);
           return saved;
         }
       } catch (err) {
@@ -538,6 +639,18 @@ export const AppProvider = ({ children }) => {
 
   // Inventory actions
   const createInventoryItem = async (itemData) => {
+    const costVal = Number(itemData.costPrice ?? itemData.cost ?? 0);
+    const sellingVal = Number(itemData.sellingPrice ?? 0);
+    const descVal = itemData.description ?? itemData.desc ?? '';
+    const payload = {
+      ...itemData,
+      costPrice: costVal,
+      cost: costVal,
+      sellingPrice: sellingVal,
+      description: descVal,
+      desc: descVal
+    };
+
     if (authToken) {
       try {
         const res = await fetch(`${API_BASE_URL}/inventory`, {
@@ -546,7 +659,7 @@ export const AppProvider = ({ children }) => {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${authToken}`
           },
-          body: JSON.stringify(itemData)
+          body: JSON.stringify(payload)
         });
         if (res.ok) {
           const newItem = await res.json();
@@ -557,11 +670,27 @@ export const AppProvider = ({ children }) => {
       } catch (e) {}
     }
 
-    setInventory(prev => [...prev, { ...itemData, status: 'active' }]);
+    setInventory(prev => [...prev, { ...payload, status: 'active' }]);
     showToast(`Item ${itemData.code} created!`, 'success');
   };
 
-  const updateItemPrice = async (code, costPrice, sellingPrice) => {
+  const updateItemPrice = async (code, fieldOrCost, valueOrSelling) => {
+    let costVal, sellingVal;
+    const existing = inventory.find(i => i.code === code);
+    if (typeof fieldOrCost === 'string') {
+      const val = parseFloat(valueOrSelling) || 0;
+      if (fieldOrCost === 'cost' || fieldOrCost === 'costPrice') {
+        costVal = val;
+        sellingVal = existing ? Number(existing.sellingPrice ?? 0) : 0;
+      } else {
+        costVal = existing ? Number(existing.cost ?? existing.costPrice ?? 0) : 0;
+        sellingVal = val;
+      }
+    } else {
+      costVal = parseFloat(fieldOrCost) || 0;
+      sellingVal = parseFloat(valueOrSelling) || 0;
+    }
+
     if (authToken) {
       try {
         const res = await fetch(`${API_BASE_URL}/inventory/${code}/price`, {
@@ -570,7 +699,7 @@ export const AppProvider = ({ children }) => {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${authToken}`
           },
-          body: JSON.stringify({ costPrice, sellingPrice })
+          body: JSON.stringify({ costPrice: costVal, sellingPrice: sellingVal })
         });
         if (res.ok) {
           showToast(`Price updated for ${code}.`, 'success');
@@ -580,7 +709,7 @@ export const AppProvider = ({ children }) => {
       } catch (e) {}
     }
 
-    setInventory(prev => prev.map(i => i.code === code ? { ...i, costPrice, sellingPrice } : i));
+    setInventory(prev => prev.map(i => i.code === code ? { ...i, cost: costVal, costPrice: costVal, sellingPrice: sellingVal } : i));
     showToast(`Price updated for ${code}.`, 'success');
   };
 
@@ -628,6 +757,64 @@ export const AppProvider = ({ children }) => {
     showToast('Shop profile updated!', 'success');
   };
 
+  const showView = (viewName) => {
+    setActiveView(viewName);
+    setIsMobileMenuOpen(false);
+  };
+
+  const deleteReceipt = async (id) => {
+    if (authToken) {
+      try {
+        await fetch(`${API_BASE_URL}/receipts/${id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+      } catch (err) {}
+    }
+    setReceipts(prev => prev.filter(r => r.id !== id));
+    showToast('Receipt deleted.', 'warning');
+  };
+
+  const removeToast = (id) => setToasts(prev => prev.filter(t => t.id !== id));
+
+  const closeConfirm = () => setConfirmModal({ active: false, title: '', msg: '', onYes: null });
+
+  const importInventoryCSV = (rows) => {
+    if (!Array.isArray(rows)) return;
+    let importedCount = 0;
+    setInventory(prev => {
+      const next = [...prev];
+      rows.forEach(r => {
+        const itemCode = r.code || r.Code || r.CODE || `ITEM-${Date.now()}-${Math.floor(Math.random()*1000)}`;
+        const existingIdx = next.findIndex(i => i.code === itemCode);
+        const newItem = {
+          code: itemCode,
+          name: r.name || r.Name || 'Imported Item',
+          desc: r.desc || r.Desc || r.description || '',
+          models: r.models || r.Models || 'Universal',
+          unit: r.unit || r.Unit || 'pc',
+          cost: parseFloat(r.cost || r.Cost || 0) || 10,
+          sellingPrice: parseFloat(r.sellingPrice || r.SellingPrice || r.price || 0) || 15,
+          stock: parseInt(r.stock || r.Stock || 0, 10) || 10,
+          minStock: parseInt(r.minStock || r.MinStock || 0, 10) || 5,
+          category: r.category || r.Category || 'General',
+          barcode: r.barcode || r.Barcode || '',
+          status: 'active',
+          dateAdded: new Date().toISOString().slice(0, 10),
+          lastUpdated: new Date().toISOString().slice(0, 10)
+        };
+        if (existingIdx >= 0) {
+          next[existingIdx] = { ...next[existingIdx], ...newItem };
+        } else {
+          next.push(newItem);
+        }
+        importedCount++;
+      });
+      return next;
+    });
+    showToast(`Successfully imported ${importedCount} item(s)!`, 'success');
+  };
+
   // Context value bundle
   const value = {
     theme,
@@ -635,11 +822,13 @@ export const AppProvider = ({ children }) => {
     currentUser,
     activeView,
     setActiveView,
+    showView,
     isMobileMenuOpen,
     setIsMobileMenuOpen,
     toasts,
     showToast,
     toast,
+    removeToast,
     notifications,
     isNotifOpen,
     setIsNotifOpen,
@@ -647,7 +836,10 @@ export const AppProvider = ({ children }) => {
     setInventory,
     receipts,
     setReceipts,
+    saveReceipt: saveVerifiedReceipt,
+    deleteReceipt,
     suppliersMeta,
+    SUPPLIERS,
     employees,
     setEmployees,
     createEmployee,
@@ -655,7 +847,9 @@ export const AppProvider = ({ children }) => {
     toggleEmployeeStatus,
     createInventoryItem,
     updateItemPrice,
+    updateInvPrice: updateItemPrice,
     deleteInventoryItem,
+    importInventoryCSV,
     sales,
     stockLog,
     auditLog,
@@ -665,6 +859,7 @@ export const AppProvider = ({ children }) => {
     updateCartQty,
     removeFromCart,
     clearCart,
+    cancelCart: clearCart,
     completeSale,
     saveVerifiedReceipt,
     shopProfile,
@@ -674,6 +869,7 @@ export const AppProvider = ({ children }) => {
     setLightboxImg,
     confirmModal,
     setConfirmModal,
+    closeConfirm,
     tourModalOpen,
     setTourModalOpen,
     tourSeen,
@@ -681,6 +877,7 @@ export const AppProvider = ({ children }) => {
     sessionCountdown,
     money,
     login,
+    attemptLogin: login,
     logout,
     refreshBackendData
   };

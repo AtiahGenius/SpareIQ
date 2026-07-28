@@ -47,14 +47,18 @@ export const SaleReceiptModal = ({ sale, onClose }) => {
                 <tr><th>Item</th><th>Qty</th><th>Price</th><th>Total</th></tr>
               </thead>
               <tbody>
-                {sale.items.map((i, idx) => (
-                  <tr key={idx}>
-                    <td>{i.name}</td>
-                    <td>{i.qty}</td>
-                    <td className="mono">{i.sellingPrice.toFixed(2)}</td>
-                    <td className="mono">{i.total.toFixed(2)}</td>
-                  </tr>
-                ))}
+                {(sale.items || []).map((i, idx) => {
+                  const price = Number(i.sellingPrice ?? i.unitPrice ?? 0);
+                  const itemTotal = Number(i.total ?? (price * (i.qty || 1)));
+                  return (
+                    <tr key={idx}>
+                      <td>{i.name || 'Item'}</td>
+                      <td>{i.qty || 1}</td>
+                      <td className="mono">{price.toFixed(2)}</td>
+                      <td className="mono">{itemTotal.toFixed(2)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
 

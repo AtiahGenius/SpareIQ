@@ -142,12 +142,15 @@ export const InventoryView = () => {
             <tbody>
               {pageItems.map(i => {
                 const low = i.stock <= i.minStock;
+                const costVal = Number(i.cost ?? i.costPrice ?? 0);
+                const sellingVal = Number(i.sellingPrice ?? 0);
+                const itemDesc = i.desc || i.description || '';
                 return (
                   <tr key={i.code}>
                     <td className="mono">{i.code}</td>
                     <td>
                       <b>{i.name}</b>
-                      <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>{i.desc}</div>
+                      {itemDesc && <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>{itemDesc}</div>}
                     </td>
                     <td><span className="tag">{i.category}</span></td>
                     <td className="mono" style={low ? { color: 'var(--danger)', fontWeight: 700 } : undefined}>
@@ -156,14 +159,16 @@ export const InventoryView = () => {
                     <td className="mono">{i.minStock}</td>
                     <td className="mono">
                       <input
-                        defaultValue={i.cost.toFixed(2)}
+                        key={`${i.code}-cost-${costVal}`}
+                        defaultValue={costVal.toFixed(2)}
                         style={{ width: '70px', border: '1px solid var(--line)', borderRadius: '6px', padding: '4px 6px', background: 'var(--surface-2)' }}
                         onBlur={(e) => updateInvPrice(i.code, 'cost', e.target.value)}
                       />
                     </td>
                     <td className="mono">
                       <input
-                        defaultValue={i.sellingPrice.toFixed(2)}
+                        key={`${i.code}-selling-${sellingVal}`}
+                        defaultValue={sellingVal.toFixed(2)}
                         style={{ width: '70px', border: '1px solid var(--line)', borderRadius: '6px', padding: '4px 6px', background: 'var(--surface-2)' }}
                         onBlur={(e) => updateInvPrice(i.code, 'sellingPrice', e.target.value)}
                       />

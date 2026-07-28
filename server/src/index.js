@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 
 import { seedDatabase } from './seed.js';
 import { startSyncWorker } from './services/syncWorker.js';
+import { prisma } from './db.js';
 
 import authRoutes from './routes/auth.js';
 import employeeRoutes from './routes/employees.js';
@@ -48,9 +49,23 @@ if (!fs.existsSync(uploadDir)) {
 app.use('/uploads', express.static(uploadDir));
 
 // Health Check
-app.get('/api/v1/health', (req, res) => {
-  res.json({ status: 'ok', service: 'SpareIQ Backend API', time: new Date().toISOString() });
+app.get('/api/v1/health', async (req, res) => {
+  let dbStatus = 'disconnected';
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    dbStatus = 'connected';
+  } catch (err) {
+    dbStatus = `error: ${err.message}`;
+  }
+
+  res.json({
+    status: 'ok',
+    service: 'SpareIQ Backend API',
+    database: dbStatus,
+    time: new Date().toISOString()
+  });
 });
+
 
 // API Routes
 app.use('/api/v1/auth', authRoutes);

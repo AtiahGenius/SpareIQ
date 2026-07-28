@@ -54,7 +54,7 @@ export const AuditLogView = () => {
             <tbody>
               {pageItems.map((a, idx) => (
                 <tr key={idx}>
-                  <td className="mono">{new Date(a.time).toLocaleString()}</td>
+                  <td className="mono">{new Date(a.timestamp || a.time || Date.now()).toLocaleString()}</td>
                   <td>{a.user}</td>
                   <td><b>{a.action}</b></td>
                   <td>{a.detail || ''}</td>

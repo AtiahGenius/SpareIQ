@@ -20,7 +20,7 @@ export const SuppliersView = () => {
           const list = receipts.filter(r => r.supplier === name);
           const total = list.reduce((s, r) => s + r.grandTotal, 0);
           const meta = suppliersMeta[name] || { phone: "—", address: "—" };
-          const productsCount = new Set(list.flatMap(r => r.items.map(i => i.name))).size;
+          const productsCount = new Set(list.flatMap(r => (r.items || []).map(i => i.name))).size;
 
           return (
             <div className="panel" key={name}>

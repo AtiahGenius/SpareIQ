@@ -13,7 +13,7 @@ export const ToastContainer = () => {
       {toasts.map(t => (
         <div key={t.id} className={`toast ${t.type ? 't-' + t.type : ''}`} role="status">
           {TOAST_ICONS[t.type] && <span className="t-icon">{TOAST_ICONS[t.type]}</span>}
-          <span>{t.msg}</span>
+          <span>{t.message || t.msg}</span>
           {t.undoFn && (
             <button
               onClick={() => {

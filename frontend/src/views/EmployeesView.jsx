@@ -16,10 +16,10 @@ export const EmployeesView = () => {
   // Leaderboard data
   const perf = {};
   sales.forEach(s => {
-    if (!perf[s.empId]) perf[s.empId] = { name: s.empName, count: 0, revenue: 0, profit: 0 };
+    if (!perf[s.empId]) perf[s.empId] = { name: s.empName || s.empId, count: 0, revenue: 0, profit: 0 };
     perf[s.empId].count++;
-    perf[s.empId].revenue += s.grandTotal;
-    perf[s.empId].profit += s.items.reduce((a, i) => a + i.profit, 0);
+    perf[s.empId].revenue += (s.grandTotal || 0);
+    perf[s.empId].profit += (s.items || []).reduce((a, i) => a + (i.profit || 0), 0);
   });
   const leaderRows = Object.values(perf).sort((a, b) => b.revenue - a.revenue);
 
