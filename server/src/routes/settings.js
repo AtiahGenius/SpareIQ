@@ -40,4 +40,67 @@ router.put('/shop-profile', authenticateToken, requireAdmin, async (req, res) =>
   }
 });
 
+// POST /api/v1/settings/backup (Admin only)
+router.post('/backup', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const fs = await import('fs');
+    const path = await import('path');
+    
+    const [employees, inventory, receipts, sales, suppliers, auditLogs, shopProfile] = await Promise.all([
+      prisma.employee.findMany(),
+      prisma.inventoryItem.findMany(),
+      prisma.receipt.findMany({ include: { items: true } }),
+      prisma.sale.findMany({ include: { items: true } }),
+      prisma.supplier.findMany(),
+      prisma.auditLog.findMany({ take: 200, orderBy: { timestamp: 'desc' } }),
+      prisma.shopProfile.findUnique({ where: { id: 1 } })
+    ]);
+
+    const backupPayload = {
+      version: '1.0.0',
+      timestamp: new Date().toISOString(),
+      shopProfile,
+      employees: employees.map(e => ({ ...e, passwordHash: 'REDACTED' })),
+      inventory,
+      receipts,
+      sales,
+      suppliers,
+      auditLogs
+    };
+
+    const backupDir = path.join(process.cwd(), 'uploads', 'backups');
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true });
+    }
+
+    const filename = `spareiq_backup_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    const filepath = path.join(backupDir, filename);
+    fs.writeFileSync(filepath, JSON.stringify(backupPayload, null, 2));
+
+    await prisma.auditLog.create({
+      data: {
+        user: `${req.user.name} (${req.user.id})`,
+        action: 'BACKUP_CREATED',
+        detail: `Created system backup archive: ${filename}`,
+        empId: req.user.id
+      }
+    });
+
+    return res.json({
+      success: true,
+      filename,
+      timestamp: backupPayload.timestamp,
+      summary: {
+        inventory: inventory.length,
+        sales: sales.length,
+        receipts: receipts.length,
+        employees: employees.length
+      }
+    });
+  } catch (err) {
+    console.error('Backup API Error:', err);
+    return res.status(500).json({ error: 'Failed to generate system backup.' });
+  }
+});
+
 export default router;

@@ -94,6 +94,26 @@ app.whenReady().then(() => {
     return { success: true };
   });
 
+  ipcMain.handle('app:run-backup', async () => {
+    try {
+      const userDataPath = app.getPath('userData');
+      const backupDir = path.join(userDataPath, 'Backups');
+      if (!fs.existsSync(backupDir)) {
+        fs.mkdirSync(backupDir, { recursive: true });
+      }
+      const dbPath = path.join(userDataPath, 'spareiq_local.db');
+      const timeStr = new Date().toISOString().replace(/[:.]/g, '-');
+      const targetDbPath = path.join(backupDir, `spareiq_backup_${timeStr}.db`);
+      if (fs.existsSync(dbPath)) {
+        fs.copyFileSync(dbPath, targetDbPath);
+      }
+      return { success: true, localPath: targetDbPath, timestamp: new Date().toISOString() };
+    } catch (err) {
+      console.error('Error running desktop backup:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
   createWindow();
 
   app.on('activate', () => {

@@ -815,6 +815,55 @@ export const AppProvider = ({ children }) => {
     showToast(`Successfully imported ${importedCount} item(s)!`, 'success');
   };
 
+  // Backup Trigger
+  const triggerBackup = async () => {
+    const timeStr = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `spareiq_backup_${timeStr}.json`;
+
+    const dataPayload = {
+      version: '1.0.0',
+      timestamp: new Date().toISOString(),
+      shopProfile,
+      inventory,
+      sales,
+      receipts,
+      suppliersMeta,
+      employees: employees.map(e => ({ ...e, password: 'REDACTED' })),
+      auditLog
+    };
+
+    // 1. Browser JSON file download
+    const blob = new Blob([JSON.stringify(dataPayload, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+
+    // 2. Desktop Electron IPC backup
+    if (window.electronAPI && typeof window.electronAPI.runBackup === 'function') {
+      try {
+        await window.electronAPI.runBackup();
+      } catch (e) {
+        console.warn('Desktop IPC backup error:', e);
+      }
+    }
+
+    // 3. Backend API backup endpoint
+    if (authToken) {
+      try {
+        await fetch(`${API_BASE_URL}/settings/backup`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+      } catch (e) {
+        console.warn('Backend API backup error:', e);
+      }
+    }
+
+    logAudit('SYSTEM_BACKUP', `Created system backup archive ${filename}`);
+    showToast(`Backup downloaded & saved (${filename})`, 'success');
+  };
+
   // Context value bundle
   const value = {
     theme,
@@ -865,6 +914,7 @@ export const AppProvider = ({ children }) => {
     shopProfile,
     setShopProfile,
     updateShopProfile,
+    triggerBackup,
     lightboxImg,
     setLightboxImg,
     confirmModal,

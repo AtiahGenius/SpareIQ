@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext';
 export const SettingsView = () => {
   const {
     currentUser, theme, setTheme, setTourModalOpen,
-    shopProfile, saveShopProfile, logAction, toast
+    shopProfile, saveShopProfile, triggerBackup, logAction, toast
   } = useApp();
 
   const [spName, setSpName] = useState(shopProfile.name);
@@ -121,16 +121,18 @@ export const SettingsView = () => {
             </div>
 
             <div className="panel">
-              <h3>Cloud Backup</h3>
-              <p style={{ fontSize: '12.5px', color: 'var(--muted)', marginBottom: '10px' }}>
-                Connect Google Drive to back up receipts automatically.
+              <h3>Database & Cloud Backup</h3>
+              <p style={{ fontSize: '12.5px', color: 'var(--muted)', marginBottom: '12px' }}>
+                Save local JSON data snapshots and trigger background cloud backup sync (Supabase & Desktop local archive).
               </p>
-              <button className="btn btn-sm" onClick={() => toast("This demo runs fully offline in your browser — connect Google Drive in the desktop build", "info")}>
-                Connect Google Drive
-              </button>
-              <button className="btn btn-sm" style={{ marginLeft: '8px' }} onClick={handleBackup}>
-                Run Backup Now
-              </button>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button className="btn btn-sm btn-primary" onClick={triggerBackup}>
+                  📥 Download Data Backup (.json)
+                </button>
+                <button className="btn btn-sm" onClick={() => toast("Connect your Google Drive account in Electron desktop preferences for daily drive backups.", "info")}>
+                  ☁️ Connect Google Drive
+                </button>
+              </div>
             </div>
 
             <div className="panel">
