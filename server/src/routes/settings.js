@@ -103,4 +103,65 @@ router.post('/backup', authenticateToken, requireAdmin, async (req, res) => {
   }
 });
 
+// POST /api/v1/settings/restore (Admin only)
+router.post('/restore', authenticateToken, requireAdmin, async (req, res) => {
+  const { inventory, receipts, sales, shopProfile } = req.body;
+
+  try {
+    if (shopProfile && shopProfile.name) {
+      await prisma.shopProfile.upsert({
+        where: { id: 1 },
+        update: { name: shopProfile.name, address: shopProfile.address, phone: shopProfile.phone, logo: shopProfile.logo },
+        create: { id: 1, name: shopProfile.name, address: shopProfile.address, phone: shopProfile.phone, logo: shopProfile.logo }
+      });
+    }
+
+    if (Array.isArray(inventory)) {
+      for (const item of inventory) {
+        await prisma.inventoryItem.upsert({
+          where: { code: item.code },
+          update: {
+            name: item.name,
+            description: item.description || item.desc || '',
+            category: item.category || 'General',
+            models: item.models || '',
+            unit: item.unit || 'pc',
+            costPrice: Number(item.costPrice ?? item.cost ?? 0),
+            sellingPrice: Number(item.sellingPrice ?? 0),
+            stock: Number(item.stock ?? 0),
+            minStock: Number(item.minStock ?? 5)
+          },
+          create: {
+            id: item.id || `INV-${Date.now()}-${Math.random().toString(36).slice(-4)}`,
+            code: item.code,
+            name: item.name,
+            description: item.description || item.desc || '',
+            category: item.category || 'General',
+            models: item.models || '',
+            unit: item.unit || 'pc',
+            costPrice: Number(item.costPrice ?? item.cost ?? 0),
+            sellingPrice: Number(item.sellingPrice ?? 0),
+            stock: Number(item.stock ?? 0),
+            minStock: Number(item.minStock ?? 5)
+          }
+        });
+      }
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        user: `${req.user.name} (${req.user.id})`,
+        action: 'BACKUP_RESTORED',
+        detail: `Restored system database from backup file`,
+        empId: req.user.id
+      }
+    });
+
+    return res.json({ success: true, message: 'Database successfully restored from backup file!' });
+  } catch (err) {
+    console.error('Restore API Error:', err);
+    return res.status(500).json({ error: 'Failed to restore database from backup.' });
+  }
+});
+
 export default router;

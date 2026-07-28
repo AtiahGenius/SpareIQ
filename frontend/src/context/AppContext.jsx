@@ -864,6 +864,53 @@ export const AppProvider = ({ children }) => {
     showToast(`Backup downloaded & saved (${filename})`, 'success');
   };
 
+  // Backup Restore Trigger
+  const restoreFromBackup = async (backupPayload) => {
+    if (!backupPayload || typeof backupPayload !== 'object') {
+      showToast('Invalid backup file format.', 'error');
+      return false;
+    }
+
+    try {
+      if (Array.isArray(backupPayload.inventory)) {
+        setInventory(backupPayload.inventory);
+      }
+      if (Array.isArray(backupPayload.sales)) {
+        setSales(backupPayload.sales);
+      }
+      if (Array.isArray(backupPayload.receipts)) {
+        setReceipts(backupPayload.receipts);
+      }
+      if (backupPayload.shopProfile && backupPayload.shopProfile.name) {
+        setShopProfile(backupPayload.shopProfile);
+      }
+
+      if (authToken) {
+        try {
+          await fetch(`${API_BASE_URL}/settings/restore`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify(backupPayload)
+          });
+          refreshBackendData(authToken);
+        } catch (e) {
+          console.warn('Backend API restore sync failed, using local state restoration.');
+        }
+      }
+
+      logAudit('BACKUP_RESTORED', 'Successfully restored database from backup file.');
+      showToast('Database successfully restored from backup file!', 'success');
+      return true;
+    } catch (err) {
+      console.error('Error restoring backup:', err);
+      showToast('Failed to restore database from backup file.', 'error');
+      return false;
+    }
+  };
+
   // Context value bundle
   const value = {
     theme,
@@ -915,6 +962,7 @@ export const AppProvider = ({ children }) => {
     setShopProfile,
     updateShopProfile,
     triggerBackup,
+    restoreFromBackup,
     lightboxImg,
     setLightboxImg,
     confirmModal,

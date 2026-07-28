@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext';
 export const SettingsView = () => {
   const {
     currentUser, theme, setTheme, setTourModalOpen,
-    shopProfile, saveShopProfile, triggerBackup, logAction, toast
+    shopProfile, saveShopProfile, triggerBackup, restoreFromBackup, logAction, toast
   } = useApp();
 
   const [spName, setSpName] = useState(shopProfile.name);
@@ -14,6 +14,21 @@ export const SettingsView = () => {
   const [pin, setPin] = useState('');
 
   if (!currentUser) return null;
+
+  const handleRestoreFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const payload = JSON.parse(event.target.result);
+        await restoreFromBackup(payload);
+      } catch (err) {
+        toast("Failed to parse backup JSON file.", "error");
+      }
+    };
+    reader.readAsText(file);
+  };
 
   const handleSaveProfile = () => {
     saveShopProfile({
@@ -123,12 +138,16 @@ export const SettingsView = () => {
             <div className="panel">
               <h3>Database & Cloud Backup</h3>
               <p style={{ fontSize: '12.5px', color: 'var(--muted)', marginBottom: '12px' }}>
-                Save local JSON data snapshots and trigger background cloud backup sync (Supabase & Desktop local archive).
+                Save local JSON data snapshots, restore database backups, or trigger background cloud sync (Supabase & Desktop local archive).
               </p>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
                 <button className="btn btn-sm btn-primary" onClick={triggerBackup}>
                   📥 Download Data Backup (.json)
                 </button>
+                <label className="btn btn-sm" style={{ cursor: 'pointer', margin: 0 }}>
+                  📤 Restore from Backup (.json)
+                  <input type="file" accept=".json" onChange={handleRestoreFile} style={{ display: 'none' }} />
+                </label>
                 <button className="btn btn-sm" onClick={() => toast("Connect your Google Drive account in Electron desktop preferences for daily drive backups.", "info")}>
                   ☁️ Connect Google Drive
                 </button>
